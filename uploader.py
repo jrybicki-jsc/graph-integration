@@ -63,7 +63,6 @@ def process_record(graph, record):
     p = Node.cast(uploader)
     if p is None:
         return
-
     p.labels.add('Person')
 
     o = Node.cast(do)
@@ -72,9 +71,6 @@ def process_record(graph, record):
     m = Node.cast(md)
     m.labels.add('Metadata')
 
-
-    p_created_o = Relationship(p, 'CREATED', o)
-    m_describes_o = Relationship(m, 'DESCRIBES', o)
     p = graph.merge_one(p)
     o = graph.merge_one(o)
     m = graph.merge_one(m)
