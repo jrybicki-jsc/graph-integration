@@ -1,12 +1,28 @@
-from py2neo import Node, Relationship, Graph, Path
+import os
+from py2neo import Node, Graph, Path, GraphError
 import json
 
 
-def get_graph():
-    g = Graph('http://neo4j:neo@0.0.0.0:49154/db/data/')
-    # g.schema.create_uniqueness_constraint('Person', 'email')
-    # g.schema.create_uniqueness_constraint('Data', 'PID')
-    return g
+GRAPH_URL = os.getenv('NEO_URL',
+                      'http://neo4j:neo@localhost:49154/db/data/')
+
+
+def get_graph(cleanup=False):
+    print 'Connecting to graph at: %s' % GRAPH_URL
+    graph = Graph(GRAPH_URL)
+    try:
+        graph.schema.create_uniqueness_constraint('Person', 'email')
+        graph.schema.create_uniqueness_constraint('Data', 'PID')
+        graph.schema.create_uniqueness_constraint('Data', 'PID')
+    except GraphError as error:
+        print 'Unable to create constrains ' \
+              '(they already exist perhaps?) %r' % error
+
+    if cleanup:
+        print 'Cleaning up...'
+        graph.cypher.execute('MATCH (n) OPTIONAL MATCH (n)-[r]-() DELETE n,r')
+
+    return graph
 
 
 def get_uploader(record):
@@ -25,21 +41,22 @@ def get_data_object(record):
     :return:
     """
     fields = ['description', 'PID', 'title', 'publication_date']
-    do = dict()
+    data = dict()
     for field in fields:
         if field not in record:
             continue
-        do[field] = record[field]
+        data[field] = record[field]
 
     record_url = 'https://b2share.eudat.eu/record/'
     if 'recordID' in record:
-        do['url'] = '%s%s' % (record_url, record['recordID'])
+        data['url'] = '%s%s' % (record_url, record['recordID'])
 
-    return do
+    return data
 
 
 def get_metadata(record):
-    fields = ['keywords'] # 'domain_metadata',
+    # TODO: 'domain_metadat' needs to be flatten somehow
+    fields = ['keywords']
     md = dict()
     for field in fields:
         if field not in record:
@@ -57,7 +74,6 @@ def process_record(graph, record):
     uploader = get_uploader(record)
     do = get_data_object(record)
     md = get_metadata(record)
-    
     print '(%s)-[:CREATED]->(%s)-[:DESCRIBED_BY]->(%s)' % (uploader, do, md)
 
     p = Node.cast(uploader)
@@ -85,7 +101,6 @@ if __name__ == "__main__":
 
     print 'Loaded %d records from %s' % (len(items), fname)
     g = get_graph()
-    g.cypher.execute('MATCH (n) OPTIONAL MATCH (n)-[r]-() DELETE n,r')
+
     processor = lambda x: process_record(g, x)
     map(processor, items)
-
