@@ -1,26 +1,26 @@
+from functools import partial
 import os
 from py2neo import Node, Graph, Path, GraphError
 import json
+from sys import exit
 
 
-GRAPH_URL = os.getenv('NEO_URL',
-                      'http://neo4j:neo@localhost:49154/db/data/')
+def clean_graph(g):
+    print 'Cleaning up...'
+    graph.cypher.execute('MATCH (n) OPTIONAL MATCH (n)-[r]-() DELETE n,r')
 
 
 def get_graph(cleanup=False):
-    print 'Connecting to graph at: %s' % GRAPH_URL
-    graph = Graph(GRAPH_URL)
+    uri = os.getenv('NEO4J_URI', 'http://neo4j:neo@localhost:7474/db/data/')
+    print 'Connecting to graph at: %s' % uri
+    graph = Graph(uri)
     try:
         graph.schema.create_uniqueness_constraint('Person', 'email')
-        graph.schema.create_uniqueness_constraint('Data', 'PID')
         graph.schema.create_uniqueness_constraint('Data', 'PID')
     except GraphError as error:
         print 'Unable to create constrains ' \
               '(they already exist perhaps?) %r' % error
-
-    if cleanup:
-        print 'Cleaning up...'
-        graph.cypher.execute('MATCH (n) OPTIONAL MATCH (n)-[r]-() DELETE n,r')
+        return None
 
     return graph
 
@@ -76,22 +76,19 @@ def process_record(graph, record):
     md = get_metadata(record)
     print '(%s)-[:CREATED]->(%s)-[:DESCRIBED_BY]->(%s)' % (uploader, do, md)
 
-    p = Node.cast(uploader)
-    if p is None:
+    if uploader is None:
         return
-    p.labels.add('Person')
+    p = graph.merge_one('Person', 'email', uploader['email'])
+    p.set_properties(uploader)
 
-    o = Node.cast(do)
-    o.labels.add('Data')
+    o = graph.merge_one('Data', 'PID', do['PID'])
+    o.set_properties(do)
 
     m = Node.cast(md)
     m.labels.add('Metadata')
+    graph.create(m)
 
-    p = graph.merge_one(p)
-    o = graph.merge_one(o)
-    m = graph.merge_one(m)
     graph.create_unique(Path(p, 'CREATED', o, 'DESCRIBED_BY', m))
-
 
 
 if __name__ == "__main__":
@@ -101,6 +98,8 @@ if __name__ == "__main__":
 
     print 'Loaded %d records from %s' % (len(items), fname)
     g = get_graph()
+    if g is None:
+        exit(-1)
 
-    processor = lambda x: process_record(g, x)
-    map(processor, items)
+    map(partial(process_record, g), items)
+    g.push()
