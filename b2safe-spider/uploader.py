@@ -78,6 +78,7 @@ def process_record(graph, record):
 
     if uploader is None:
         return
+      
     p = graph.merge_one('Person', 'email', uploader['email'])
     p.set_properties(uploader)
 
