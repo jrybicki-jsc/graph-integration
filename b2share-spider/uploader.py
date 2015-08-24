@@ -5,33 +5,75 @@ import json
 from sys import exit
 
 
-def clean_graph(g):
+class DummyGraph(object):
+    def __init__(self):
+        super(DummyGraph, self).__init__()
+
+    def merge_one(self, *args, **kwargs):
+        print 'Dummy merging one'
+        return Node()
+
+    def create(self, *args, **kwargs):
+        print 'Dummy create'
+
+        return Node()
+
+    def create_unique(self, *args, **kwargs):
+        print 'Dummy create unique'
+
+    def push(self, *args, **kwargs):
+        print 'Dummy pushing'
+
+
+def clean_graph(graph):
     print 'Cleaning up...'
     graph.cypher.execute('MATCH (n) OPTIONAL MATCH (n)-[r]-() DELETE n,r')
 
 
-def get_graph(cleanup=False):
+def get_graph(cleanup=False, dry_run=False):
+    if dry_run:
+        print 'Dry run: using dummy graph'
+        return DummyGraph()
+
     uri = os.getenv('NEO4J_URI', 'http://neo4j:neo@localhost:7474/db/data/')
     print 'Connecting to graph at: %s' % uri
     graph = Graph(uri)
+    if cleanup:
+        clean_graph(graph)
     try:
+        graph.schema.create_uniqueness_constraint('Keyword', 'value')
         graph.schema.create_uniqueness_constraint('Person', 'email')
         graph.schema.create_uniqueness_constraint('Data', 'PID')
     except GraphError as error:
         print 'Unable to create constrains ' \
               '(they already exist perhaps?) %r' % error
-        return None
+        # return None
 
     return graph
 
 
-def get_uploader(record):
-    if 'uploaded_by' not in record:
-        # invalid record?
-        return None
+def get_fields(record, fields):
+    return {k: v for k, v in record.iteritems() if k in fields and v
+            is not None and v != ''}
 
-    email = record['uploaded_by']
+
+def safe_get_field(field_name, record):
+    return record[field_name] if field_name in record else None
+
+
+def get_uploader(record):
+    email = safe_get_field('uploaded_by', record)
+    if email is None or email == '':
+        return None
     return {'name': email, 'email': email}
+
+
+def get_metadata(record):
+    return safe_get_field('domain_metadata', record)
+
+
+def get_keywords(record):
+    return safe_get_field('keywords', record)
 
 
 def get_data_object(record):
@@ -41,11 +83,7 @@ def get_data_object(record):
     :return:
     """
     fields = ['description', 'PID', 'title', 'publication_date']
-    data = dict()
-    for field in fields:
-        if field not in record:
-            continue
-        data[field] = record[field]
+    data = get_fields(record, fields)
 
     record_url = 'https://b2share.eudat.eu/record/'
     if 'recordID' in record:
@@ -53,17 +91,8 @@ def get_data_object(record):
 
     return data
 
-
-def get_metadata(record):
-    # TODO: 'domain_metadat' needs to be flatten somehow
-    fields = ['keywords']
-    md = dict()
-    for field in fields:
-        if field not in record:
-            continue
-        md[field] = record[field]
-
-    return md
+uploaded = 0
+skipped = 0
 
 
 def process_record(graph, record):
@@ -71,26 +100,39 @@ def process_record(graph, record):
     domain: (something like community)
     creator: (names or project)
     """
+    global uploaded, skipped
+
     uploader = get_uploader(record)
     do = get_data_object(record)
     md = get_metadata(record)
+    keywords = get_keywords(record)
     print '(%s)-[:CREATED]->(%s)-[:DESCRIBED_BY]->(%s)' % (uploader, do, md)
+    for keyword in keywords:
+        print '(%s)-[:HAS_TAG]->(%s)' % (do, keyword)
 
-    if uploader is None:
+    if uploader is None or do is None:
+        skipped += 1
         return
-      
+
     p = graph.merge_one('Person', 'email', uploader['email'])
     p.set_properties(uploader)
 
     o = graph.merge_one('Data', 'PID', do['PID'])
     o.set_properties(do)
 
-    m = Node.cast(md)
-    m.labels.add('Metadata')
-    graph.create(m)
+    graph.create_unique(Path(p, 'CREATED', o))
 
-    graph.create_unique(Path(p, 'CREATED', o, 'DESCRIBED_BY', m))
+    if md is not None:
+        m = Node.cast(md)
+        m.labels.add('Metadata')
+        graph.create(m)
+        graph.create_unique(Path(o, 'DESCRIBED_BY', m))
 
+    for keyword in keywords:
+        keyword_tag = graph.merge_one('Keyword', 'value', keyword)
+        graph.create_unique(Path(o, 'HAS_TAG', keyword_tag))
+
+    uploaded += 1
 
 if __name__ == "__main__":
     fname = 'out.json'
@@ -98,9 +140,14 @@ if __name__ == "__main__":
         items = json.load(f)
 
     print 'Loaded %d records from %s' % (len(items), fname)
-    g = get_graph()
+
+    g = get_graph(cleanup=True, dry_run=False)
+
     if g is None:
         exit(-1)
 
     map(partial(process_record, g), items)
+    print 'Uploaded %s (skipped %s). Loaded %s' % (uploaded, skipped,
+                                                   len(items))
+
     g.push()

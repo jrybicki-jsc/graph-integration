@@ -21,7 +21,7 @@ def retrieve_items(page=0):
     print '%d retrieved, elapsed time %s' % (len(content),
                                              r.elapsed)
 
-    if len(content)!=0:
+    if len(content) != 0:
         print 'There might be next page!'
         content = content + retrieve_items(page + 1)
 
