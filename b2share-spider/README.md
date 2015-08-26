@@ -34,7 +34,7 @@ return p1, do, do2, k, p2 limit 90
 
 Close friends of Peter:
 ```
-MATCH (Peter:Person {name: 'peter.wittenburg@mpi.nl'}), (b:Person),
+MATCH (Peter:Person {name: 'peter...nl'}), (b:Person),
       p=shortestPath((Peter)-[*..5]-(b))
 RETURN p
 ```
