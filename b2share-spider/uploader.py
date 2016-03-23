@@ -25,12 +25,22 @@ class DummyGraph(object):
         print 'Dummy pushing'
 
 
+def delete_constrain(graph, label, property):
+    try:        
+        graph.schema.drop_uniqueness_constraint(label, property)
+    except GraphError as error:
+        print 'Unable to delete constrain %r' % error
+
+
 def clean_graph(graph):
     print 'Cleaning up...'
+    delete_constrain(graph, 'Keyword', 'value')
+    delete_constrain(graph, 'Person', 'email')
+    delete_constrain(graph, 'Data', 'PID')
     graph.cypher.execute('MATCH (n) OPTIONAL MATCH (n)-[r]-() DELETE n,r')
 
 
-def get_graph(cleanup=False, dry_run=False):
+def get_graph(cleanup=False, dry_run=False, constrains=True):
     if dry_run:
         print 'Dry run: using dummy graph'
         return DummyGraph()
@@ -40,6 +50,9 @@ def get_graph(cleanup=False, dry_run=False):
     graph = Graph(uri)
     if cleanup:
         clean_graph(graph)
+    if not constrains:
+        return graph
+      
     try:
         graph.schema.create_uniqueness_constraint('Keyword', 'value')
         graph.schema.create_uniqueness_constraint('Person', 'email')
@@ -53,7 +66,7 @@ def get_graph(cleanup=False, dry_run=False):
 
 
 def get_fields(record, fields):
-    return {k: v for k, v in record.iteritems() if k in fields and v
+    return {k: v.replace('\n',' ').strip() for k, v in record.iteritems() if k in fields and v
             is not None and v != ''}
 
 
@@ -90,6 +103,7 @@ def get_data_object(record):
         data['url'] = '%s%s' % (record_url, record['recordID'])
 
     return data
+
 
 uploaded = 0
 skipped = 0
@@ -134,6 +148,7 @@ def process_record(graph, record):
 
     uploaded += 1
 
+
 if __name__ == "__main__":
     fname = 'out.json'
     with open(fname) as f:
@@ -141,7 +156,7 @@ if __name__ == "__main__":
 
     print 'Loaded %d records from %s' % (len(items), fname)
 
-    g = get_graph(cleanup=True, dry_run=False)
+    g = get_graph(cleanup=False, dry_run=False, constrains=True)
 
     if g is None:
         exit(-1)
