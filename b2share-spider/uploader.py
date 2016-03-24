@@ -95,9 +95,12 @@ def get_data_object(record):
     :param record:
     :return:
     """
+    if 'PID' not in record or record['PID']=="":
+      return None
+    
     fields = ['description', 'PID', 'title', 'publication_date']
     data = get_fields(record, fields)
-
+        
     record_url = 'https://b2share.eudat.eu/record/'
     if 'recordID' in record:
         data['url'] = '%s%s' % (record_url, record['recordID'])
@@ -120,13 +123,13 @@ def process_record(graph, record):
     do = get_data_object(record)
     md = get_metadata(record)
     keywords = get_keywords(record)
-    print '(%s)-[:CREATED]->(%s)-[:DESCRIBED_BY]->(%s)' % (uploader, do, md)
-    for keyword in keywords:
-        print '(%s)-[:HAS_TAG]->(%s)' % (do, keyword)
-
     if uploader is None or do is None:
         skipped += 1
         return
+      
+    print '(%s)-[:CREATED]->(%s)-[:DESCRIBED_BY]->(%s)' % (uploader, do, md)
+    for keyword in keywords:
+        print '(%s)-[:HAS_TAG]->(%s)' % (do, keyword)
 
     p = graph.merge_one('Person', 'email', uploader['email'])
     p.set_properties(uploader)
